@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { addProducto } from "./productos";
+import { useState, useEffect } from "react";
+import { addProducto, getProductos } from "./productos";
 
 // ─── MOCK DATA ────────────────────────────────────────────────────────────────
 const MOCK_PRODUCTS = [
@@ -286,7 +286,7 @@ const DashboardPage = ({ products, onEdit }) => {
           <table className="w-full">
             <thead>
               <tr className="border-b border-white/4">
-                {["Producto","SKU","ML","Interno","Estado",""].map(h=>(
+                {["Producto","SKU","Ubicación","ML","Interno","Estado",""].map(h=>(
                   <th key={h} className="text-left text-[9px] font-black text-white/25 uppercase tracking-widest px-5 py-3">{h}</th>
                 ))}
               </tr>
@@ -304,6 +304,7 @@ const DashboardPage = ({ products, onEdit }) => {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 font-mono text-[10px] text-white/30">{p.sku}</td>
+                    <td className="px-5 py-3.5 text-[10px] text-white/40">{p.locations?.[0]?.name || "—"}</td>
                     <td className="px-5 py-3.5 font-black text-[#f97316] text-lg">{p.stockML}</td>
                     <td className="px-5 py-3.5 font-black text-lg"><span className={stockColor}>{p.stockInternal}</span></td>
                     <td className="px-5 py-3.5"><Tag product={p}/></td>
@@ -383,10 +384,13 @@ const ProductsPage = ({ products, onEdit }) => {
   );
 };
 
-const AlertsPage = () => {
-  const [alerts, setAlerts] = useState(ALERTS);
-  const resolve = id => setAlerts(a=>a.map(x=>x.id===id?{...x,done:true}:x));
-  const active = alerts.filter(a=>!a.done);
+const AlertsPage = ({ products = [] }) => {
+  const rawAlerts = products.filter(p => getStatus(p) !== "ok").map(p => ({id:`a-${p.id}`, product:p.title, sku:p.sku, type:getStatus(p), stock:p.stockInternal, threshold:p.lowThreshold}));
+  const [resolved, setResolved] = useState([]);
+  const alerts = rawAlerts.filter(a => !resolved.includes(a.id));
+  const resolve = id => setResolved(r => [...r, id]);
+  
+  
   return (
     <div className="space-y-5">
       <div>
@@ -407,7 +411,7 @@ const AlertsPage = () => {
         ))}
       </div>
       <div className="space-y-2">
-        {active.map(a=>(
+        {alerts.map(a=>(
           <div key={a.id} className={`bg-[#111318] border rounded-2xl p-4 flex items-center gap-4 ${a.type==="critical"?"border-red-500/20":"border-amber-500/20"}`}>
             <div className={`w-1.5 h-12 rounded-full shrink-0 ${a.type==="critical"?"bg-red-500":"bg-amber-500"}`}/>
             <div className="flex-1">
@@ -421,7 +425,7 @@ const AlertsPage = () => {
             </button>
           </div>
         ))}
-        {active.length===0 && <div className="bg-[#111318] border border-white/8 rounded-2xl p-8 text-center"><p className="text-white/25 text-sm">No hay alertas activas</p></div>}
+        {alerts.length===0 && <div className="bg-[#111318] border border-white/8 rounded-2xl p-8 text-center"><p className="text-white/25 text-sm">No hay alertas activas</p></div>}
       </div>
     </div>
   );
@@ -430,16 +434,27 @@ const AlertsPage = () => {
 const LocationsPage = ({ products }) => {
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState(null);
-  const sectors = [...new Set(MOCK_LOCATIONS.map(l=>l.sector))];
-  const filtered = MOCK_LOCATIONS.filter(l=>l.name.toLowerCase().includes(q.toLowerCase()));
 
-  // Buscar productos de una ubicación — primero por id, luego por nombre de ubicación
-  const getProdsForLoc = (loc) => {
-    const byId = products.filter(p => loc.products.includes(p.id));
-    const byName = products.filter(p => p.locations && p.locations.some(l => l.name === loc.name));
-    const all = [...byId, ...byName];
-    return [...new Map(all.map(p=>[p.id||p.sku, p])).values()];
-  };
+  // Construir ubicaciones dinámicamente desde los productos reales
+  const allLocations = [];
+  const locMap = {};
+  products.forEach(p => {
+    if (!p.locations) return;
+    p.locations.forEach(loc => {
+      if (!loc.name) return;
+      if (!locMap[loc.name]) {
+        locMap[loc.name] = { name: loc.name, sector: loc.name.split(/[0-9]/)[0].trim() || "General", used: 0, capacity: 100, prods: [] };
+        allLocations.push(locMap[loc.name]);
+      }
+      locMap[loc.name].used += (loc.units || p.stockInternal || 0);
+      locMap[loc.name].prods.push(p);
+    });
+  });
+
+  const sectors = [...new Set(allLocations.map(l => l.sector))].sort();
+  const filtered = allLocations.filter(l => l.name.toLowerCase().includes(q.toLowerCase()));
+
+  const getProdsForLoc = (loc) => locMap[loc.name]?.prods || [];
 
   if (selected) {
     const locProds = getProdsForLoc(selected);
@@ -517,13 +532,18 @@ const LocationsPage = ({ products }) => {
         <div>
           <p className="text-[9px] font-black text-[#f97316] uppercase tracking-[0.25em] mb-2">Logística</p>
           <h1 className="text-4xl font-black text-white leading-none tracking-tight">Depósito</h1>
+          <p className="text-xs text-white/25 mt-2">{allLocations.length} ubicaciones · {products.length} productos</p>
         </div>
-        <button className="flex items-center gap-1.5 text-xs px-3 py-2 bg-[#f97316] hover:bg-[#e8650a] text-white font-black rounded-xl transition-colors"><I n="plus" s={13}/>Nueva ubicación</button>
       </div>
       <div className="relative">
         <I n="search" s={13} c="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25"/>
         <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar ubicación..." className="w-full pl-9 pr-4 h-10 bg-[#111318] border border-white/8 rounded-xl text-sm text-white placeholder-white/15 outline-none focus:border-[#f97316]/30"/>
       </div>
+      {filtered.length === 0 && (
+        <div className="bg-[#111318] border border-white/8 rounded-2xl p-8 text-center">
+          <p className="text-white/25 text-sm">No se encontraron ubicaciones</p>
+        </div>
+      )}
       {sectors.map(sector=>{
         const locs = filtered.filter(l=>l.sector===sector);
         if(!locs.length) return null;
@@ -532,20 +552,22 @@ const LocationsPage = ({ products }) => {
             <p className="text-[9px] font-black text-white/25 uppercase tracking-[0.2em] mb-3">Sector {sector}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {locs.map(loc=>{
-                const pct = Math.round((loc.used/loc.capacity)*100);
-                const bc = pct>85?"bg-red-500":pct>60?"bg-amber-500":"bg-emerald-500";
                 const locProds = getProdsForLoc(loc);
+                const totalUnits = locProds.reduce((a,p)=>{
+                  const li = p.locations?.find(l=>l.name===loc.name);
+                  return a + (li?.units || p.stockInternal || 0);
+                }, 0);
+                const pct = Math.min(Math.round((totalUnits/100)*100), 100);
+                const bc = pct>85?"bg-red-500":pct>60?"bg-amber-500":"bg-emerald-500";
                 return (
-                  <button key={loc.id} onClick={()=>setSelected(loc)} className="bg-[#111318] border border-white/8 rounded-2xl p-4 hover:border-[#f97316]/40 hover:bg-white/2 transition-all text-left group">
+                  <button key={loc.name} onClick={()=>setSelected(loc)}
+                    className="bg-[#111318] border border-white/8 rounded-2xl p-4 hover:border-[#f97316]/40 hover:bg-white/2 transition-all text-left group">
                     <div className="flex items-start justify-between mb-3">
                       <p className="font-black text-white text-sm group-hover:text-[#f97316] transition-colors">{loc.name}</p>
-                      <span className="text-xs font-black text-white/30 font-mono">{pct}%</span>
+                      <span className="text-[10px] font-black text-white/30">{locProds.length} prod.</span>
                     </div>
                     <Bar pct={pct} color={bc}/>
-                    <div className="flex items-center justify-between mt-2">
-                      <p className="text-[10px] text-white/25 font-mono">{loc.used} / {loc.capacity} u.</p>
-                      <p className="text-[10px] text-white/25">{locProds.length} producto{locProds.length!==1?"s":""}</p>
-                    </div>
+                    <p className="text-[10px] text-white/25 mt-2">{totalUnits} unidades</p>
                   </button>
                 );
               })}
@@ -627,13 +649,25 @@ const SettingsPage = () => (
 );
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function StockML() {
-  const [page, setPage]     = useState("dashboard");
-  const [products, setProducts] = useState(MOCK_PRODUCTS);
+  const [page, setPage]         = useState("dashboard");
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [editing, setEditing]   = useState(null);
   const [newOpen, setNewOpen]   = useState(false);
   const [sidebar, setSidebar]   = useState(false);
   const [syncing, setSyncing]   = useState(false);
+  const [search, setSearch]     = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    getProductos().then(data => {
+      setProducts(data);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
   const handleSave = (id, stock) => {
     setProducts(p=>p.map(x=>x.id===id?{...x,stockInternal:stock}:x));
@@ -646,20 +680,38 @@ export default function StockML() {
     setSyncing(false);
   };
 
+  const alertCount = products.filter(p => getStatus(p) !== "ok").length;
+
+  const searchResults = search.length > 1
+    ? products.filter(p =>
+        p.title?.toLowerCase().includes(search.toLowerCase()) ||
+        p.sku?.toLowerCase().includes(search.toLowerCase()) ||
+        p.locations?.some(l => l.name?.toLowerCase().includes(search.toLowerCase()))
+      )
+    : [];
+
   const nav = [
     {id:"dashboard", label:"Dashboard",    icon:"grid"},
     {id:"products",  label:"Productos",    icon:"box"},
-    {id:"alerts",    label:"Alertas",      icon:"bell",  badge:ALERTS.length},
+    {id:"alerts",    label:"Alertas",      icon:"bell", badge:alertCount},
     {id:"locations", label:"Depósito",     icon:"pin"},
     {id:"history",   label:"Historial",    icon:"clock"},
     {id:"settings",  label:"Configuración",icon:"cog"},
   ];
 
   const Page = () => {
+    if (loading) return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-[#f97316] border-t-transparent rounded-full animate-spin mx-auto mb-3"/>
+          <p className="text-white/40 text-sm">Cargando productos...</p>
+        </div>
+      </div>
+    );
     switch(page) {
       case "dashboard": return <DashboardPage products={products} onEdit={setEditing}/>;
       case "products":  return <ProductsPage  products={products} onEdit={setEditing}/>;
-      case "alerts":    return <AlertsPage/>;
+      case "alerts":    return <AlertsPage products={products}/>;
       case "locations": return <LocationsPage products={products}/>;
       case "history":   return <HistoryPage/>;
       case "settings":  return <SettingsPage/>;
@@ -683,7 +735,6 @@ export default function StockML() {
 
       {/* SIDEBAR */}
       <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-52 bg-[#0e1015] border-r border-white/5 flex flex-col transition-transform duration-200 ${sidebar?"translate-x-0":"-translate-x-full lg:translate-x-0"}`}>
-        {/* Logo */}
         <div className="p-5 border-b border-white/5">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-[#f97316] rounded-xl flex items-center justify-center shrink-0">
@@ -695,8 +746,6 @@ export default function StockML() {
             </div>
           </div>
         </div>
-
-        {/* Nav */}
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
           {nav.map(item=>(
             <button key={item.id} onClick={()=>{setPage(item.id);setSidebar(false)}}
@@ -707,8 +756,6 @@ export default function StockML() {
             </button>
           ))}
         </nav>
-
-        {/* Actions */}
         <div className="p-4 border-t border-white/5 space-y-2">
           <button onClick={()=>setNewOpen(true)} className="w-full flex items-center justify-center gap-2 h-9 rounded-xl bg-[#f97316] hover:bg-[#e8650a] text-white font-black text-sm transition-colors">
             <I n="plus" s={14}/>Nuevo producto
@@ -731,14 +778,47 @@ export default function StockML() {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 bg-[#0e1015] border-b border-white/5 flex items-center px-5 gap-3 shrink-0">
           <button onClick={()=>setSidebar(true)} className="lg:hidden text-white/25 hover:text-white"><I n="menu"/></button>
-          <div className="flex-1"/>
+          {/* BUSCADOR */}
+          <div className="flex-1 max-w-sm relative">
+            <I n="search" s={13} c="absolute left-3 top-1/2 -translate-y-1/2 text-white/25"/>
+            <input
+              value={search}
+              onChange={e=>{setSearch(e.target.value);setSearchOpen(true)}}
+              onFocus={()=>setSearchOpen(true)}
+              onBlur={()=>setTimeout(()=>setSearchOpen(false),200)}
+              placeholder="Buscar producto, SKU, ubicación..."
+              className="w-full pl-8 pr-4 h-8 bg-white/5 border border-white/8 rounded-lg text-xs text-white placeholder-white/20 outline-none focus:border-[#f97316]/30"
+            />
+            {searchOpen && searchResults.length > 0 && (
+              <div className="absolute top-10 left-0 right-0 bg-[#1a1d24] border border-white/10 rounded-xl shadow-2xl z-50 max-h-80 overflow-y-auto">
+                {searchResults.slice(0,10).map(p=>{
+                  const s = getStatus(p);
+                  const sc = s==="ok"?"text-white":s==="warning"?"text-amber-400":"text-red-400";
+                  return (
+                    <button key={p.id} onMouseDown={()=>{setPage("products");setSearch("");setSearchOpen(false)}}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left border-b border-white/5 last:border-0">
+                      <span className="text-lg shrink-0">{p.image||"📦"}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{p.title}</p>
+                        <div className="flex gap-2 text-[10px] text-white/30 mt-0.5">
+                          <span className="font-mono">{p.sku}</span>
+                          {p.locations?.length>0 && <span>📍 {p.locations[0].name}</span>}
+                        </div>
+                      </div>
+                      <span className={`text-lg font-black shrink-0 ${sc}`}>{p.stockInternal}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-1.5 bg-emerald-500/8 border border-emerald-500/15 text-emerald-400 px-3 py-1 rounded-full">
             <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"/>
             <span className="text-[9px] font-black uppercase tracking-widest">ML Conectado</span>
           </div>
           <button onClick={()=>setPage("alerts")} className="relative w-8 h-8 flex items-center justify-center text-white/25 hover:text-white bg-white/4 rounded-lg border border-white/6 transition-colors">
             <I n="bell" s={14}/>
-            {ALERTS.length>0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full"/>}
+            {alertCount>0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-500 rounded-full"/>}
           </button>
         </header>
         <main className="flex-1 overflow-auto p-5 md:p-7">
@@ -760,7 +840,6 @@ export default function StockML() {
               sales:0, monthlySales:0, createdAt:new Date().toISOString()
             };
             const docRef = await addProducto(nuevoProducto);
-            // Agregar al listado local con el id de Firebase
             setProducts(prev => [...prev, { ...nuevoProducto, id: docRef?.id || `local-${Date.now()}` }]);
             setNewOpen(false);
           }}
