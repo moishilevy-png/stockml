@@ -724,7 +724,7 @@ export default function StockML() {
           actualizados++;
         } else {
           const nuevoProducto = {
-            title: item.title,
+            title: item.seller_sku || item.id,
             sku: item.id,
             category: "Mercado Libre",
             price: item.price || 0,

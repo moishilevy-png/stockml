@@ -16,19 +16,27 @@ export default async function handler(req, res) {
 
     if (ids.length === 0) return res.json([]);
 
-    // Traer detalles de cada publicación en grupos de 20
+    // Traer detalles incluyendo seller_sku
     const chunks = [];
     for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
 
     const products = [];
     for (const chunk of chunks) {
       const detailRes = await fetch(
-        `https://api.mercadolibre.com/items?ids=${chunk.join(',')}&attributes=id,title,available_quantity,price,thumbnail`,
+        `https://api.mercadolibre.com/items?ids=${chunk.join(',')}&attributes=id,title,available_quantity,price,thumbnail,seller_sku`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const details = await detailRes.json();
       details.forEach(d => {
-        if (d.code === 200) products.push(d.body);
+        if (d.code === 200) {
+          const item = d.body;
+          // seller_sku puede estar en attributes
+          const skuAttr = item.attributes?.find(a => a.id === 'SELLER_SKU');
+          products.push({
+            ...item,
+            seller_sku: skuAttr?.value_name || item.seller_sku || null
+          });
+        }
       });
     }
 
