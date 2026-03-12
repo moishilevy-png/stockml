@@ -25,10 +25,3 @@ export default async function handler(req, res) {
     res.status(400).json({ error: 'Auth failed', details: data });
   }
 }
-```
-
-Guardá, luego en la terminal:
-```
-git add .
-git commit -m "auth callback"
-git push
