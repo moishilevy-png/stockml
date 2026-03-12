@@ -175,7 +175,7 @@ const NuevoModal = ({ onClose, onSave }) => {
 };
 
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
-const DashboardPage = ({ products, onEdit }) => {
+const DashboardPage = ({ products, onEdit, mlConnected = false }) => {
   const noStock   = products.filter(p=>p.stockInternal===0).length;
   const lowStock  = products.filter(p=>getStatus(p)==="warning").length;
   const totalVal  = products.reduce((a,p)=>a+p.price*p.stockInternal,0);
@@ -192,9 +192,9 @@ const DashboardPage = ({ products, onEdit }) => {
           <h1 className="text-4xl font-black text-white leading-none tracking-tight">Dashboard</h1>
           <p className="text-sm text-white/30 mt-2 capitalize">{fecha}</p>
         </div>
-        <div className="shrink-0 flex items-center gap-2 bg-emerald-500/8 border border-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-full">
-          <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"/>
-          <span className="text-[10px] font-black uppercase tracking-widest">ML Conectado</span>
+        <div className={`shrink-0 flex items-center gap-2 border px-3 py-1.5 rounded-full ${mlConnected ? "bg-emerald-500/8 border-emerald-500/20 text-emerald-400" : "bg-white/5 border-white/10 text-white/30"}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${mlConnected ? "bg-emerald-400 animate-pulse" : "bg-white/30"}`}/>
+          <span className="text-[10px] font-black uppercase tracking-widest">{mlConnected ? "ML Conectado" : "ML Desconectado"}</span>
         </div>
       </div>
 
@@ -649,8 +649,6 @@ const SettingsPage = () => (
 );
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
-
-// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function StockML() {
   const [page, setPage]         = useState("dashboard");
   const [products, setProducts] = useState([]);
@@ -659,8 +657,27 @@ export default function StockML() {
   const [newOpen, setNewOpen]   = useState(false);
   const [sidebar, setSidebar]   = useState(false);
   const [syncing, setSyncing]   = useState(false);
+  const [syncMsg, setSyncMsg]   = useState("");
   const [search, setSearch]     = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mlToken, setMlToken]   = useState("APP_USR-1864770524455888-031215-b0e09b4ee526790f7668f572709c52b2-2070821310");
+  const [mlUserId, setMlUserId] = useState("2070821310");
+  const [mlConnected, setMlConnected] = useState(true);
+
+  // Leer token de ML desde la URL si acaba de autenticarse
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    const userId = params.get("user_id");
+    if (token && userId) {
+      sessionStorage.setItem("ml_token", token);
+      sessionStorage.setItem("ml_user_id", userId);
+      setMlToken(token);
+      setMlUserId(userId);
+      setMlConnected(true);
+      window.history.replaceState({}, "", "/");
+    }
+  }, []);
 
   useEffect(() => {
     getProductos().then(data => {
@@ -675,8 +692,33 @@ export default function StockML() {
   };
 
   const handleSync = async () => {
+    if (!mlConnected || !mlToken || !mlUserId) {
+      // Redirigir a autorizar ML
+      window.location.href = `https://auth.mercadolibre.com.ar/authorization?response_type=code&client_id=1864770524455888&redirect_uri=https://stockml-fawn.vercel.app/auth/callback`;
+      return;
+    }
     setSyncing(true);
-    await new Promise(r=>setTimeout(r,2000));
+    setSyncMsg("Conectando con Mercado Libre...");
+    try {
+      const res = await fetch(`/api/ml-stock?token=${mlToken}&user_id=${mlUserId}`);
+      const mlItems = await res.json();
+      if (!Array.isArray(mlItems)) throw new Error("Respuesta inválida");
+      setSyncMsg(`Sincronizando ${mlItems.length} publicaciones...`);
+      // Actualizar stockML de cada producto que coincida por título o SKU
+      setProducts(prev => prev.map(p => {
+        const match = mlItems.find(item =>
+          item.title?.toLowerCase().includes(p.title?.toLowerCase()) ||
+          p.title?.toLowerCase().includes(item.title?.toLowerCase())
+        );
+        if (match) return { ...p, stockML: match.available_quantity ?? p.stockML };
+        return p;
+      }));
+      setSyncMsg(`✓ ${mlItems.length} publicaciones actualizadas`);
+      setTimeout(() => setSyncMsg(""), 3000);
+    } catch(e) {
+      setSyncMsg("Error al sincronizar");
+      setTimeout(() => setSyncMsg(""), 3000);
+    }
     setSyncing(false);
   };
 
@@ -709,7 +751,7 @@ export default function StockML() {
       </div>
     );
     switch(page) {
-      case "dashboard": return <DashboardPage products={products} onEdit={setEditing}/>;
+      case "dashboard": return <DashboardPage products={products} onEdit={setEditing} mlConnected={mlConnected}/>;
       case "products":  return <ProductsPage  products={products} onEdit={setEditing}/>;
       case "alerts":    return <AlertsPage products={products}/>;
       case "locations": return <LocationsPage products={products}/>;
@@ -760,9 +802,9 @@ export default function StockML() {
           <button onClick={()=>setNewOpen(true)} className="w-full flex items-center justify-center gap-2 h-9 rounded-xl bg-[#f97316] hover:bg-[#e8650a] text-white font-black text-sm transition-colors">
             <I n="plus" s={14}/>Nuevo producto
           </button>
-          <button onClick={handleSync} disabled={syncing} className={`w-full flex items-center justify-center gap-2 h-9 rounded-xl text-sm font-semibold transition-all border ${syncing?"bg-white/3 text-white/20 border-white/5 cursor-not-allowed":"bg-white/4 hover:bg-white/7 text-white/50 border-white/8"}`}>
+          <button onClick={handleSync} disabled={syncing} className={`w-full flex items-center justify-center gap-2 h-9 rounded-xl text-sm font-semibold transition-all border ${syncing?"bg-white/3 text-white/20 border-white/5 cursor-not-allowed":mlConnected?"bg-[#f97316]/10 hover:bg-[#f97316]/20 text-[#f97316] border-[#f97316]/20":"bg-white/4 hover:bg-white/7 text-white/50 border-white/8"}`}>
             <I n="sync" s={13} c={syncing?"spin":""}/>
-            {syncing?"Sincronizando...":"Sincronizar ML"}
+            {syncing ? (syncMsg || "Sincronizando...") : mlConnected ? "Sincronizar ML" : "Conectar ML"}
           </button>
           <div className="flex items-center gap-2.5 px-1 pt-2">
             <div className="w-7 h-7 rounded-full bg-[#f97316] flex items-center justify-center text-[10px] font-black text-white shrink-0">JP</div>
@@ -812,9 +854,9 @@ export default function StockML() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1.5 bg-emerald-500/8 border border-emerald-500/15 text-emerald-400 px-3 py-1 rounded-full">
-            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"/>
-            <span className="text-[9px] font-black uppercase tracking-widest">ML Conectado</span>
+          <div className={`flex items-center gap-1.5 border px-3 py-1 rounded-full ${mlConnected ? "bg-emerald-500/8 border-emerald-500/15 text-emerald-400" : "bg-white/5 border-white/10 text-white/30"}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${mlConnected ? "bg-emerald-400 animate-pulse" : "bg-white/30"}`}/>
+            <span className="text-[9px] font-black uppercase tracking-widest">{mlConnected ? "ML Conectado" : "ML Desconectado"}</span>
           </div>
           <button onClick={()=>setPage("alerts")} className="relative w-8 h-8 flex items-center justify-center text-white/25 hover:text-white bg-white/4 rounded-lg border border-white/6 transition-colors">
             <I n="bell" s={14}/>
