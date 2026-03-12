@@ -693,7 +693,6 @@ export default function StockML() {
 
   const handleSync = async () => {
     if (!mlConnected || !mlToken || !mlUserId) {
-      // Redirigir a autorizar ML
       window.location.href = `https://auth.mercadolibre.com.ar/authorization?response_type=code&client_id=1864770524455888&redirect_uri=https://stockml-fawn.vercel.app/auth/callback`;
       return;
     }
@@ -702,22 +701,61 @@ export default function StockML() {
     try {
       const res = await fetch(`/api/ml-stock?token=${mlToken}&user_id=${mlUserId}`);
       const mlItems = await res.json();
-      if (!Array.isArray(mlItems)) throw new Error("Respuesta inválida");
-      setSyncMsg(`Sincronizando ${mlItems.length} publicaciones...`);
-      // Actualizar stockML de cada producto que coincida por título o SKU
-      setProducts(prev => prev.map(p => {
-        const match = mlItems.find(item =>
-          item.title?.toLowerCase().includes(p.title?.toLowerCase()) ||
-          p.title?.toLowerCase().includes(item.title?.toLowerCase())
+      if (!Array.isArray(mlItems)) throw new Error("Respuesta invalida");
+      setSyncMsg(`Procesando ${mlItems.length} publicaciones...`);
+
+      let actualizados = 0;
+      let agregados = 0;
+      const nuevosProductos = [];
+      let currentProducts = [];
+      setProducts(prev => { currentProducts = prev; return prev; });
+
+      for (const item of mlItems) {
+        const match = currentProducts.find(p =>
+          p.mlId === item.id ||
+          item.title?.toLowerCase().includes(p.title?.toLowerCase().substring(0,10)) ||
+          p.title?.toLowerCase().includes(item.title?.toLowerCase().substring(0,10))
         );
-        if (match) return { ...p, stockML: match.available_quantity ?? p.stockML };
-        return p;
-      }));
-      setSyncMsg(`✓ ${mlItems.length} publicaciones actualizadas`);
-      setTimeout(() => setSyncMsg(""), 3000);
+
+        if (match) {
+          setProducts(prev => prev.map(p =>
+            p.id === match.id ? { ...p, stockML: item.available_quantity ?? p.stockML, mlId: item.id } : p
+          ));
+          actualizados++;
+        } else {
+          const nuevoProducto = {
+            title: item.title,
+            sku: item.id,
+            category: "Mercado Libre",
+            price: item.price || 0,
+            stockInternal: item.available_quantity || 0,
+            stockML: item.available_quantity || 0,
+            status: "active",
+            locations: [],
+            image: "🛒",
+            lowThreshold: 5,
+            criticalThreshold: 1,
+            sales: 0,
+            monthlySales: 0,
+            mlId: item.id,
+            thumbnail: item.thumbnail,
+            createdAt: new Date().toISOString()
+          };
+          const docRef = await addProducto(nuevoProducto);
+          nuevosProductos.push({ ...nuevoProducto, id: docRef?.id || `ml-${item.id}` });
+          agregados++;
+        }
+      }
+
+      if (nuevosProductos.length > 0) {
+        setProducts(prev => [...prev, ...nuevosProductos]);
+      }
+
+      setSyncMsg(`OK ${actualizados} actualizados - ${agregados} nuevos de ML`);
+      setTimeout(() => setSyncMsg(""), 4000);
     } catch(e) {
-      setSyncMsg("Error al sincronizar");
-      setTimeout(() => setSyncMsg(""), 3000);
+      setSyncMsg("Error: " + e.message);
+      setTimeout(() => setSyncMsg(""), 4000);
     }
     setSyncing(false);
   };
