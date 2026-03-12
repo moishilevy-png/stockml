@@ -6,7 +6,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Traer todas las publicaciones activas
     const itemsRes = await fetch(
       `https://api.mercadolibre.com/users/${user_id}/items/search?status=active&limit=100`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -16,25 +15,29 @@ export default async function handler(req, res) {
 
     if (ids.length === 0) return res.json([]);
 
-    // Traer detalles incluyendo seller_sku
     const chunks = [];
     for (let i = 0; i < ids.length; i += 20) chunks.push(ids.slice(i, i + 20));
 
     const products = [];
     for (const chunk of chunks) {
       const detailRes = await fetch(
-        `https://api.mercadolibre.com/items?ids=${chunk.join(',')}&attributes=id,title,available_quantity,price,thumbnail,seller_sku`,
+        `https://api.mercadolibre.com/items?ids=${chunk.join(',')}&attributes=id,title,available_quantity,price,thumbnail,attributes`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const details = await detailRes.json();
       details.forEach(d => {
         if (d.code === 200) {
           const item = d.body;
-          // seller_sku puede estar en attributes
-          const skuAttr = item.attributes?.find(a => a.id === 'SELLER_SKU');
+          const skuAttr = item.attributes?.find(a =>
+            a.id === 'SELLER_SKU' || a.id === 'seller_sku'
+          );
           products.push({
-            ...item,
-            seller_sku: skuAttr?.value_name || item.seller_sku || null
+            id: item.id,
+            title: item.title,
+            available_quantity: item.available_quantity,
+            price: item.price,
+            thumbnail: item.thumbnail,
+            seller_sku: skuAttr?.value_name || null
           });
         }
       });
