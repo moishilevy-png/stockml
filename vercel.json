@@ -1,13 +1,10 @@
 {
+  "functions": {
+    "api/*.js": {
+      "runtime": "nodejs20.x"
+    }
+  },
   "rewrites": [
-    { "source": "/auth/callback", "destination": "/api/callback" },
-    { "source": "/notifications", "destination": "/api/notifications" }
+    { "source": "/auth/callback", "destination": "/api/callback" }
   ]
 }
-```
-
-Guardá con **Ctrl+S**, luego en la terminal:
-```
-git add .
-git commit -m "vercel routing"
-git push
